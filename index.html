@@ -156,7 +156,7 @@
 
   .level-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 16px;
     margin: 28px 0;
   }
@@ -399,8 +399,8 @@
 
   let cameraX = 0;
   let currentLevel = 0;
-  let levelProgress = [0, 0, 0, 0, 0]; // 4关 + Boss关
-  let bestStars = [0, 0, 0, 0, 0];
+  let levelProgress = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // 10 关
+  let bestStars = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
   // ===== 实体类 =====
   class Player {
@@ -560,12 +560,201 @@
     }
   }
 
+  // ===== Boss: 机械龟王 =====
+  class BigBoss {
+    constructor(x, y) {
+      this.x = x; this.y = y; this.startX = x; this.startY = y;
+      this.radius = 36;
+      this.vx = 160; this.vy = 0;
+      this.hp = 5; this.maxHp = 5;
+      this.alive = true;
+      this.invincible = 0;
+      this.angle = 0;
+      this.weakFlash = 0;
+      this.patrolMin = 120;
+      this.patrolMax = 1280;
+      this.speedBase = 160;
+      this.phase = 1;
+      this.facing = 1;
+      this.jumpTimer = 0;
+      this.stunTimer = 0;
+      this.targetX = x;
+      this.onGround = true;
+      this.shockwave = 0;
+    }
+    getPhase() {
+      if (this.hp >= 4) return 1;
+      if (this.hp >= 2) return 2;
+      return 3;
+    }
+    update(dt) {
+      if (!this.alive) return;
+      if (this.invincible > 0) this.invincible -= dt;
+      this.weakFlash *= 0.92;
+      this.shockwave = Math.max(0, this.shockwave - dt * 3);
+
+      const prevPhase = this.phase;
+      this.phase = this.getPhase();
+      if (this.phase !== prevPhase) {
+        this.weakFlash = 1.0;
+        if (this.phase === 2) { this.speedBase = 140; this.vx = 0; this.vy = 0; this.jumpTimer = 0.8; this.stunTimer = 0; this.onGround = true; }
+        if (this.phase === 3) { this.speedBase = 360; this.vx = this.facing * this.speedBase; }
+      }
+
+      if (this.stunTimer > 0) {
+        this.stunTimer -= dt;
+        this.vx *= 0.9;
+        if (!this.onGround) { this.vy += GRAVITY * dt; this.y += this.vy * dt; }
+        if (this.y > this.startY) { this.y = this.startY; this.vy = 0; this.onGround = true; }
+        return;
+      }
+
+      if (this.phase === 1) {
+        this.x += this.vx * dt;
+        if (this.x > this.patrolMax) { this.x = this.patrolMax; this.vx = -Math.abs(this.vx); }
+        if (this.x < this.patrolMin) { this.x = this.patrolMin; this.vx = Math.abs(this.vx); }
+        this.facing = this.vx > 0 ? 1 : -1;
+        this.angle += this.vx * dt * 0.05;
+      } else if (this.phase === 2) {
+        if (this.jumpTimer > 0) {
+          this.jumpTimer -= dt;
+          this.y = this.startY - 40 - Math.sin(this.jumpTimer * 4) * 30;
+          this.x += (player.x - this.x) * 0.5 * dt;
+        } else if (this.onGround) {
+          this.onGround = false;
+          this.targetX = Math.max(this.patrolMin, Math.min(this.patrolMax, player.x));
+          const dist = this.targetX - this.x;
+          this.vx = dist / 0.55;
+          this.vy = -620;
+        } else {
+          this.vy += GRAVITY * dt;
+          this.x += this.vx * dt;
+          this.y += this.vy * dt;
+          if (this.y >= this.startY) {
+            this.y = this.startY;
+            this.vy = 0;
+            this.vx = 0;
+            this.onGround = true;
+            this.stunTimer = 1.2;
+            this.jumpTimer = 0.5;
+            this.shockwave = 1.0;
+            screenShake = 12;
+            spawnParticles(this.x, this.y + this.radius, '#94a3b8', 30);
+            playSound('bosshit');
+          }
+        }
+        this.angle += this.vx * dt * 0.05;
+      } else if (this.phase === 3) {
+        this.x += this.vx * dt;
+        if (this.x > this.patrolMax) { this.x = this.patrolMax; this.vx = -Math.abs(this.vx); }
+        if (this.x < this.patrolMin) { this.x = this.patrolMin; this.vx = Math.abs(this.vx); }
+        this.facing = this.vx > 0 ? 1 : -1;
+        this.angle += this.vx * dt * 0.08;
+      }
+    }
+    draw() {
+      if (!this.alive) return;
+      const x = this.x - cameraX;
+      ctx.save();
+      ctx.translate(x, this.y);
+
+      ctx.save(); ctx.translate(0, this.radius+6); ctx.scale(1,0.3); ctx.globalAlpha=0.3; ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(0,0,this.radius,0,Math.PI*2); ctx.fill(); ctx.restore();
+
+      ctx.rotate(this.angle);
+
+      const shellGrad = ctx.createRadialGradient(-8,-8,4,0,0,this.radius);
+      shellGrad.addColorStop(0, '#64748b');
+      shellGrad.addColorStop(0.5, '#475569');
+      shellGrad.addColorStop(1, '#1e293b');
+      ctx.fillStyle = shellGrad;
+      ctx.beginPath(); ctx.arc(0,0,this.radius,0,Math.PI*2); ctx.fill();
+
+      ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2;
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a)*this.radius*0.5, Math.sin(a)*this.radius*0.5);
+        ctx.lineTo(Math.cos(a)*this.radius, Math.sin(a)*this.radius);
+        ctx.stroke();
+      }
+      ctx.beginPath(); ctx.arc(0,0,this.radius*0.5,0,Math.PI*2); ctx.stroke();
+
+      ctx.fillStyle = '#0f172a';
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a-0.12)*this.radius, Math.sin(a-0.12)*this.radius);
+        ctx.lineTo(Math.cos(a)*(this.radius+10), Math.sin(a)*(this.radius+10));
+        ctx.lineTo(Math.cos(a+0.12)*this.radius, Math.sin(a+0.12)*this.radius);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 0.6 + Math.sin(Date.now()/150)*0.3;
+      ctx.fillStyle = this.phase === 3 ? '#ef4444' : (this.phase === 2 ? '#facc15' : '#22c55e');
+      ctx.beginPath(); ctx.arc(0,0,this.radius*0.25,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 1;
+
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(x, this.y);
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(this.facing*12, -10, 7, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath(); ctx.arc(this.facing*14, -10, 3.5, 0, Math.PI*2); ctx.fill();
+
+      if (this.weakFlash > 0.1 || this.stunTimer > 0) {
+        ctx.globalAlpha = Math.max(this.weakFlash, this.stunTimer > 0 ? 0.6 : 0);
+        ctx.fillStyle = '#facc15';
+        ctx.beginPath();
+        ctx.arc(-this.facing*this.radius*0.75, -4, 14, 0, Math.PI*2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+
+      if (this.shockwave > 0) {
+        ctx.save();
+        ctx.translate(x, this.y + this.radius);
+        ctx.globalAlpha = this.shockwave;
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(0, 0, (1 - this.shockwave) * 200 + 20, 0, Math.PI*2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    takeHit() {
+      this.hp--;
+      this.invincible = 0.9;
+      this.weakFlash = 0;
+      const oldPhase = this.phase;
+      this.phase = this.getPhase();
+      if (this.phase === 2 && oldPhase === 1) { this.speedBase = 140; this.vx = 0; this.vy = 0; this.jumpTimer = 0.8; this.stunTimer = 0; this.onGround = true; }
+      else if (this.phase === 3 && oldPhase === 2) { this.speedBase = 360; this.vx = this.facing * this.speedBase; }
+      else if (this.phase === 1) { this.speedBase *= 1.25; this.vx = (this.vx > 0 ? 1 : -1) * this.speedBase; }
+      else if (this.phase === 2) { this.speedBase = Math.min(220, this.speedBase + 30); }
+      playSound('bosshit');
+      spawnParticles(this.x, this.y, '#facc15', 22);
+      updateBossHUD();
+      if (this.hp <= 0) {
+        this.alive = false;
+        playSound('bossdefeat');
+        spawnParticles(this.x, this.y, '#facc15', 50);
+        spawnParticles(this.x, this.y, '#ef4444', 30);
+      }
+    }
+  }
+
   // ===== 关卡数据 =====
   let platforms=[], slopes=[], springs=[], coins=[], stars=[], enemies=[], checkpoint, goal, player, particles=[];
   let boss = null;
   let levelWidth=3700, coinCount=0, starCount=0, gameRunning=false, won=false;
   let lastCheckpoint={x:80,y:350};
   let isBossLevel = false;
+  let isBigBossLevel = false;
+  let screenShake = 0;
 
   const levels = [
     {
@@ -637,15 +826,78 @@
       title: '小Boss · 铁壳龟', subtitle: 'Boss 城堡',
       width: 1200, start: [100, 400], checkpoint: [100, 400], goal: [1100, 400],
       isBoss: true,
+      platforms: [ [0,460,1200,80,'stone'], [200,380,80,20,'wood'], [920,380,80,20,'wood'] ],
+      slopes: [], springs: [[210,364,'big'],[930,364,'big']], coins: [[120,420],[300,330],[500,420],[700,420],[900,330]], stars: [], enemies: []
+    },
+    {
+      title: '翠绿丘陵 1-5', subtitle: '冲刺平原',
+      width: 4200, start: [80, 380], checkpoint: [2100, 360], goal: [4000, 360],
       platforms: [
-        [0,460,1200,80,'stone'],
-        [200,380,80,20,'wood'], [920,380,80,20,'wood']
+        [0,420,600,120,'grass'], [700,400,900,140,'grass'], [1700,420,700,120,'grass'],
+        [2500,400,900,140,'grass'], [3500,420,700,120,'grass'],
+        [600,280,150,20,'wood'], [1500,260,120,20,'wood'], [2400,260,100,20,'wood'], [3300,260,120,20,'wood']
+      ],
+      slopes: [[600,420,700,400],[1600,420,1700,420],[3400,400,3500,420]],
+      springs: [[2200,404,'small'],[3000,384,'big']],
+      coins: [[120,380],[300,380],[500,380],[800,360],[1000,360],[1200,360],[1400,360],[1800,360],[2000,360],[2200,360],[2600,360],[2800,360],[3000,360],[3200,360],[3600,360],[3800,360],[3900,360],[4000,360]],
+      stars: [[600,240],[1500,220],[3300,220]],
+      enemies: [[900,366,120],[1900,386,100],[2900,366,120]]
+    },
+    {
+      title: '翠绿丘陵 1-6', subtitle: '弹簧峡谷',
+      width: 4300, start: [80, 450], checkpoint: [2100, 350], goal: [4100, 380],
+      platforms: [
+        [0,500,300,80,'grass'], [500,400,120,20,'wood'], [800,320,120,20,'wood'],
+        [1100,420,120,20,'wood'], [1400,280,120,20,'wood'], [1700,420,200,120,'grass'],
+        [2100,300,120,20,'wood'], [2400,420,120,20,'wood'], [2700,260,120,20,'wood'],
+        [3000,420,120,20,'wood'], [3300,300,120,20,'wood'], [3600,420,700,120,'grass'],
+        [600,240,100,20,'wood'], [1900,220,100,20,'wood'], [2900,220,100,20,'wood']
       ],
       slopes: [],
-      springs: [[210,364,'big'],[930,364,'big']],
-      coins: [[120,420],[300,330],[500,420],[700,420],[900,330]],
-      stars: [],
-      enemies: []
+      springs: [[120,484,'small'],[520,384,'big'],[820,304,'big'],[1120,404,'big'],[1420,264,'big'],[1720,404,'big'],[2120,284,'big'],[2420,404,'big'],[2720,244,'big'],[3020,404,'big'],[3320,284,'big']],
+      coins: [[150,450],[520,360],[820,280],[1120,380],[1420,240],[1720,360],[2120,260],[2420,380],[2720,220],[3020,380],[3320,260],[3500,360],[3700,360],[3900,360],[4050,380]],
+      stars: [[600,200],[1400,240],[2900,180]],
+      enemies: [[1750,386,80],[2450,386,60],[3650,386,100]]
+    },
+    {
+      title: '翠绿丘陵 1-7', subtitle: '过山车坡道',
+      width: 4400, start: [80, 400], checkpoint: [2200, 350], goal: [4200, 380],
+      platforms: [
+        [0,400,500,160,'grass'], [600,460,500,80,'grass'], [1200,360,400,180,'grass'],
+        [1700,480,400,80,'grass'], [2200,340,300,200,'grass'], [2600,460,400,80,'grass'],
+        [3200,360,400,180,'grass'], [3700,420,700,120,'grass'],
+        [1100,280,120,20,'wood'], [2000,260,120,20,'wood'], [3000,260,120,20,'wood']
+      ],
+      slopes: [[500,400,600,460],[1100,460,1200,360],[1600,360,1700,480],[2100,480,2200,340],[2500,340,2600,460],[3100,460,3200,360],[3600,360,3700,420]],
+      springs: [[2800,444,'big']],
+      coins: [[120,360],[300,360],[500,360],[650,420],[800,420],[1000,420],[1250,320],[1400,320],[1750,440],[1900,440],[2050,440],[2150,320],[2250,300],[2650,420],[2850,420],[3250,320],[3400,320],[3600,320],[3800,360],[4000,360]],
+      stars: [[1100,240],[2000,220],[3000,240]],
+      enemies: [[800,426,100],[1400,326,80],[2700,426,100],[3800,386,100]]
+    },
+    {
+      title: '翠绿丘陵 1-8', subtitle: '天空长廊',
+      width: 4600, start: [80, 420], checkpoint: [2300, 340], goal: [4400, 380],
+      platforms: [
+        [0,460,400,80,'grass'], [500,380,180,20,'wood'], [760,320,150,20,'wood'],
+        [980,400,150,20,'wood'], [1200,280,120,20,'wood'], [1420,420,200,120,'grass'],
+        [1700,300,120,20,'wood'], [1950,420,120,20,'wood'], [2150,260,120,20,'wood'],
+        [2400,420,180,20,'wood'], [2700,300,120,20,'wood'], [2950,420,150,20,'wood'],
+        [3200,260,120,20,'wood'], [3400,420,200,120,'grass'], [3700,320,120,20,'wood'],
+        [4000,420,600,120,'grass'],
+        [550,240,100,20,'wood'], [1340,220,100,20,'wood'], [2800,200,100,20,'wood']
+      ],
+      slopes: [[400,460,500,380],[940,400,980,400],[1320,420,1420,420],[1870,420,1950,420],[2340,420,2400,420],[2910,420,2950,420],[3360,420,3400,420]],
+      springs: [[520,364,'big'],[1200,264,'small'],[1930,404,'small'],[2380,404,'big'],[2680,284,'small'],[3180,404,'big']],
+      coins: [[120,420],[250,420],[380,420],[520,340],[650,280],[800,420],[950,360],[1050,360],[1220,240],[1350,200],[1500,360],[1620,360],[1720,280],[1850,360],[1980,360],[2180,240],[2250,420],[2450,360],[2550,360],[2720,260],[2850,420],[3050,420],[3220,240],[3350,420],[3520,360],[3650,360],[3750,320],[4050,360],[4200,360],[4350,360]],
+      stars: [[550,200],[1340,180],[2800,170]],
+      enemies: [[650,306,60],[1550,386,80],[2450,386,70],[3600,386,80]]
+    },
+    {
+      title: '大Boss · 机械龟王', subtitle: '最终城堡',
+      width: 1400, start: [100, 400], checkpoint: [100, 400], goal: [1300, 400],
+      isBoss: true, isBigBoss: true,
+      platforms: [ [0,460,1400,80,'stone'], [100,360,120,20,'wood'], [1180,360,120,20,'wood'] ],
+      slopes: [], springs: [[150,344,'big'],[1230,344,'big']], coins: [[120,420],[700,420],[1280,420]], stars: [], enemies: []
     }
   ];
 
@@ -655,6 +907,7 @@
     boss = null;
     coinCount = 0; starCount = 0; won = false; levelWidth = L.width;
     isBossLevel = !!L.isBoss;
+    isBigBossLevel = !!L.isBigBoss;
     lastCheckpoint = { x: L.start[0], y: L.start[1] };
 
     L.platforms.forEach(p => platforms.push(new Platform(p[0], p[1], p[2], p[3], p[4])));
@@ -667,7 +920,13 @@
 
     if (isBossLevel) {
       goal = null;
-      boss = new Boss(600, 428);
+      if (isBigBossLevel) {
+        boss = new BigBoss(700, 424);
+        document.getElementById('boss-name').textContent = '机械龟王';
+      } else {
+        boss = new Boss(600, 428);
+        document.getElementById('boss-name').textContent = '铁壳龟';
+      }
       document.getElementById('boss-hud').classList.add('active');
       updateBossHUD();
     } else {
@@ -678,7 +937,12 @@
     player = new Player(L.start[0], L.start[1]);
     cameraX = 0;
     document.getElementById('level-title').textContent = L.title;
-    document.getElementById('level-badge').textContent = isBossLevel ? 'BOSS' : '1-' + idx;
+    let badgeText = 'BOSS';
+    if (!isBossLevel) {
+      if (idx < 4) badgeText = '1-' + (idx + 1);
+      else badgeText = '1-' + idx;
+    }
+    document.getElementById('level-badge').textContent = badgeText;
     updateUI();
   }
 
@@ -735,18 +999,29 @@
     if (!b.alive || b.invincible > 0) return;
     const dist = Math.hypot(p.x-b.x, p.y-b.y);
     if (dist < p.radius + b.radius) {
-      // 判断是否击中弱点：从上方且弹珠在Boss背后
-      const fromAbove = p.vy > 50 && p.y < b.y - 10;
-      const ballBehind = (p.x - b.x) * b.vx < 0; // 弹珠在Boss运动反方向
-      if (fromAbove && ballBehind) {
+      let hit = false;
+      if (b instanceof BigBoss) {
+        if (b.stunTimer > 0) {
+          hit = true;
+        } else {
+          const fromAbove = p.vy > 40 && p.y < b.y - 8;
+          const ballBehind = (p.x - b.x) * b.facing < 0;
+          hit = fromAbove && ballBehind;
+        }
+      } else {
+        const fromAbove = p.vy > 50 && p.y < b.y - 10;
+        const ballBehind = (p.x - b.x) * b.vx < 0;
+        hit = fromAbove && ballBehind;
+      }
+      if (hit) {
         b.takeHit();
-        p.vy = -400;
+        p.vy = -420;
         showMessage('击中！剩余 ' + b.hp + ' 心');
-      } else if (p.invincible <= 0) {
+      } else if (p.invincible <= 0 && !(b instanceof BigBoss && b.stunTimer > 0)) {
         p.takeDamage(1);
         const pushDir = (p.x - b.x) / dist;
-        p.vx += pushDir * 300;
-        p.vy = -200;
+        p.vx += pushDir * 320;
+        p.vy = -220;
       }
     }
   }
@@ -769,7 +1044,7 @@
       playSound('win'); spawnParticles(goal.x, goal.y, '#ef4444', 20);
       bestStars[currentLevel] = Math.max(bestStars[currentLevel], starCount);
       levelProgress[currentLevel] = 2;
-      if (currentLevel < 4) levelProgress[currentLevel+1] = 1;
+      if (currentLevel < 9) levelProgress[currentLevel+1] = 1;
       setTimeout(() => showLevelComplete(), 1000);
     }
   }
@@ -778,7 +1053,8 @@
     if (!isBossLevel || !boss || boss.alive) return;
     if (!won) {
       won = true;
-      levelProgress[4] = 2;
+      levelProgress[currentLevel] = 2;
+      if (currentLevel < 9) levelProgress[currentLevel+1] = 1;
       playSound('win');
       setTimeout(() => showLevelComplete(), 1500);
     }
@@ -799,8 +1075,10 @@
     if (!boss) return;
     const pct = Math.max(0, boss.hp / boss.maxHp * 100);
     document.getElementById('boss-hp-fill').style.width = pct + '%';
-    if (boss.hp <= 1) {
+    if (boss.hp <= Math.ceil(boss.maxHp / 3)) {
       document.getElementById('boss-hp-fill').style.background = 'linear-gradient(90deg, #dc2626, #ef4444)';
+    } else {
+      document.getElementById('boss-hp-fill').style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
     }
   }
 
@@ -815,21 +1093,22 @@
     gameRunning = false;
     document.getElementById('boss-hud').classList.remove('active');
     const L = levels[currentLevel];
-    if (currentLevel < 4) {
+    if (!L.isBigBoss) {
       showScreen('level-complete-screen');
       document.getElementById('level-complete-stats').innerHTML = L.title + '<br>星碎片 ' + starCount + '/3 · 金币 ' + coinCount + ' 枚';
       const nextBtn = document.getElementById('next-level-btn');
-      if (currentLevel < 3) {
-        nextBtn.textContent = '下一关';
-        nextBtn.classList.remove('hidden');
+      if (currentLevel === 3) {
+        nextBtn.textContent = '挑战小Boss';
+      } else if (currentLevel === 8) {
+        nextBtn.textContent = '挑战大Boss';
       } else {
-        nextBtn.textContent = '挑战 Boss';
-        nextBtn.classList.remove('hidden');
+        nextBtn.textContent = '下一关';
       }
+      nextBtn.classList.remove('hidden');
     } else {
       showScreen('world-complete-screen');
-      const totalStars = bestStars.slice(0,4).reduce((a,b)=>a+b,0);
-      document.getElementById('world-complete-stats').innerHTML = '4 关总计星碎片 ' + totalStars + '/12<br>Boss 已击败！金币 ' + coinCount + ' 枚';
+      const totalStars = bestStars.filter((_, i) => i !== 4 && i !== 9).reduce((a,b) => a+b, 0);
+      document.getElementById('world-complete-stats').innerHTML = '8 关总计星碎片 ' + totalStars + '/24<br>大Boss 机械龟王已击败！金币 ' + coinCount + ' 枚';
     }
   }
 
@@ -849,9 +1128,10 @@
       const card = document.createElement('button');
       card.className = 'level-card' + (L.isBoss ? ' boss-card' : '');
       if (L.isBoss) {
-        card.innerHTML = '<div class="level-num">BOSS</div><div class="level-name">' + L.subtitle + '</div><div class="level-stars">' + (cleared ? '🏆' : '⚔️') + '</div>';
+        card.innerHTML = '<div class="level-num">BOSS</div><div class="level-name">' + L.title + '</div><div class="level-stars">' + (cleared ? '🏆' : '⚔️') + '</div>';
       } else {
-        card.innerHTML = '<div class="level-num">1-' + (i+1) + '</div><div class="level-name">' + L.subtitle + '</div><div class="level-stars">' + '⭐'.repeat(stars) + '☆'.repeat(3-stars) + '</div>';
+        const levelNum = i < 4 ? (i + 1) : i;
+        card.innerHTML = '<div class="level-num">1-' + levelNum + '</div><div class="level-name">' + L.subtitle + '</div><div class="level-stars">' + '⭐'.repeat(stars) + '☆'.repeat(3-stars) + '</div>';
       }
       card.disabled = !unlocked;
       card.style.opacity = unlocked ? '1' : '0.4';
@@ -907,8 +1187,8 @@
       if (boss && boss.alive) {
         boss.update(dt);
         checkBossCollision(player, boss);
-        // 弱点提示：Boss 减速时暴露弱点
-        if (Math.abs(boss.vx) < boss.speedBase * 0.8) boss.weakFlash = 0.6;
+        // 弱点提示：普通Boss减速时暴露弱点
+        if (!(boss instanceof BigBoss) && Math.abs(boss.vx) < boss.speedBase * 0.8) boss.weakFlash = 0.6;
       }
       checkBossDefeated();
 
@@ -918,9 +1198,21 @@
       let targetCam = player.x - GAME_W * 0.35;
       targetCam = Math.max(0, Math.min(targetCam, levelWidth - GAME_W));
       cameraX += (targetCam - cameraX) * 0.1;
+
+      if (screenShake > 0) {
+        screenShake *= 0.9;
+        if (screenShake < 0.5) screenShake = 0;
+      }
     }
 
+    let shakeX = 0, shakeY = 0;
+    if (screenShake > 0) {
+      shakeX = (Math.random() - 0.5) * screenShake;
+      shakeY = (Math.random() - 0.5) * screenShake;
+    }
     ctx.clearRect(0, 0, GAME_W, GAME_H);
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
     drawBackground();
     slopes.forEach(s => s.draw());
     platforms.forEach(p => p.draw());
@@ -945,6 +1237,7 @@
       ctx.fillText(msgText, GAME_W/2, 100);
       ctx.restore();
     }
+    ctx.restore();
   }
 
   // ===== 初始化 =====
@@ -955,7 +1248,7 @@
   document.getElementById('level-select-btn').addEventListener('click', openLevelSelect);
   document.getElementById('retry-btn').addEventListener('click', () => startLevel(currentLevel));
   document.getElementById('lose-select-btn').addEventListener('click', openLevelSelect);
-  document.getElementById('world-restart-btn').addEventListener('click', () => { currentLevel=0; levelProgress=[1,0,0,0,0]; bestStars=[0,0,0,0,0]; openLevelSelect(); });
+  document.getElementById('world-restart-btn').addEventListener('click', () => { currentLevel=0; levelProgress=[1,0,0,0,0,0,0,0,0,0]; bestStars=[0,0,0,0,0,0,0,0,0,0]; openLevelSelect(); });
 
   let lastTime = 0;
   requestAnimationFrame(loop);
